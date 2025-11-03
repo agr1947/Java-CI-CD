@@ -1,10 +1,10 @@
 name: CI WORKFLOW
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - develop
-      - main
       - feature/*
 
 env:
