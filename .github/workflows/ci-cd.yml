@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - feature/*
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: 17
+          distribution: temurin
+          cache: maven
+
+      - name: Build and test (Maven)
+        run: mvn -B verify
+
+      # optional
+      - name: Upload jar
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/*.jar
+
+  docker-and-push:
+    needs: build-and-test # This stage will be triggered only if build-and-test completes successfully
+    runs-on: ubuntu-latest
+
+    environment: dev
+
+    permissions:
+      contents: read
+      packages: write   # needed for ghcr.io
+      id-token: write   
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tags
+        id: vars
+        run: |
+          # lower-case the image name because GHCR is picky
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository }}"
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+
+          # default tag from ref
+          REF="${{ github.ref_name }}"
+          TAG="$REF"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # strip 'v' from e.g. v1.2.3
+            TAG="${REF#v}"
+          elif [ "$REF" = "main" ]; then
+            TAG="latest"
+          elif [ "$REF" = "develop" ]; then
+            TAG="dev"
+          fi
+
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+
+      - name: Build image
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/simple-java-app:${{ github.sha }} .
+
+      - name: Push image
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/simple-java-app:${{ github.sha }}
